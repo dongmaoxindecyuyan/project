@@ -1,0 +1,80 @@
+version: "3.4"
+
+name: easegen
+
+services:
+  mysql:
+    container_name: easegen-mysql
+#    image: mysql:8
+    image: registry.cn-hangzhou.aliyuncs.com/easegen/mysql:8
+    restart: unless-stopped
+    tty: true
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-easegen}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-Easegen@2024}
+    volumes:
+      - ./mysqldata:/var/lib/mysql/
+      - ./sql/easegen.sql:/docker-entrypoint-initdb.d/ruoyi-vue-pro.sql:ro
+    command: [
+      "--lower_case_table_names=1",         # 设置不区分大小写
+      "--bind-address=0.0.0.0"           # 允许公网访问
+    ]
+  redis:
+    container_name: easegen-redis
+#    image: redis:6-alpine
+    image: registry.cn-hangzhou.aliyuncs.com/easegen/redis:6-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--requirepass", "Easegen@2024"] # 设置 Redis 密码
+    volumes:
+      - ./redisdata:/data
+
+  easegen-admin:
+    container_name: easegen-admin
+    build:
+      context: ./yudao-server/
+#    image: taoofagi/easegen-admin:v0.1
+    image: registry.cn-hangzhou.aliyuncs.com/easegen/easegen-admin:v0.2.6
+    restart: unless-stopped
+    ports:
+      - "48080:48080"
+    environment:
+      # https://github.com/polovyivan/docker-pass-configs-to-container
+      SPRING_PROFILES_ACTIVE: local
+      JAVA_OPTS:
+        ${JAVA_OPTS:-
+          -Xms1024m
+          -Xmx1024m
+          -Djava.security.egd=file:/dev/./urandom
+        }
+      ARGS:
+        --spring.datasource.dynamic.datasource.master.url=${MASTER_DATASOURCE_URL:-jdbc:mysql://easegen-mysql:3306/easegen?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&nullCatalogMeansCurrent=true}
+        --spring.datasource.dynamic.datasource.master.username=${MASTER_DATASOURCE_USERNAME:-root}
+        --spring.datasource.dynamic.datasource.master.password=${MASTER_DATASOURCE_PASSWORD:-Easegen@2024}
+        --spring.data.redis.host=${REDIS_HOST:-easegen-redis}
+        --spring.data.redis.password=${REDIS_PASSWORD:-Easegen@2024}
+    depends_on:
+      - mysql
+      - redis
+
+  easegen-front:
+    container_name: easegen-front
+#    image: nginx:alpine               # 直接使用官方的 Nginx 镜像
+    image: registry.cn-hangzhou.aliyuncs.com/easegen/nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "48083:80"
+    volumes:
+      - ./dist:/usr/share/nginx/html        # 映射本地的静态文件目录
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro      # 映射本地的 Nginx 配置文件
+    depends_on:
+      - easegen-admin
+
+volumes:
+  mysql:
+    driver: local
+  redis:
+    driver: local
